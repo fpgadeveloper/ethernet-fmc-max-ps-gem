@@ -1,4 +1,4 @@
-# Ethernet FMC Max PS GEM
+# PS GEM Reference Designs for the Opsero Ethernet FMC Max (OP080)
 
 ## Description
 
@@ -8,6 +8,8 @@ Each port of the mezzanine card is driven by a PS GEM routed through EMIO GMII i
 programmable logic, where an Ethernet PCS/PMA or SGMII core (PG047) converts the GMII to
 SGMII over a gigabit transceiver lane connected to the port's TI DP83867 PHY. No soft MAC
 or DMA IP is used — the ports are handled by the standard PS GEM software drivers.
+
+![Ethernet FMC Max with ZCU106](docs/source/images/zcu106-with-op080_03.jpg)
 
 Important links:
 

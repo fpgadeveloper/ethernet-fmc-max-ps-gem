@@ -1,0 +1,25 @@
+__pycache__/
+RemoteSystemsTempFiles/
+Vivado/.Xil/
+Vivado/logs/
+*.log
+*.jou
+Vitis/*_workspace/
+Vitis/.*/
+Vitis/.*
+Vitis/boot/
+docs/build/
+bootimages/
+PetaLinux/offline.txt
+# UPDATER START
+Vivado/uzev/
+PetaLinux/uzev/
+Vivado/vck190_fmcp1/
+PetaLinux/vck190_fmcp1/
+Vivado/zcu102_hpc0/
+PetaLinux/zcu102_hpc0/
+Vivado/zcu106_hpc0/
+PetaLinux/zcu106_hpc0/
+Vivado/zcu111/
+PetaLinux/zcu111/
+# UPDATER END

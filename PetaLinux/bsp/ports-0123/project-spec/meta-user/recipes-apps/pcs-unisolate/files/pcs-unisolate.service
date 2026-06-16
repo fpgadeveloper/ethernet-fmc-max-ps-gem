@@ -1,0 +1,17 @@
+[Unit]
+Description=Clear PL PCS/PMA ISOLATE bit (Ethernet FMC Max SGMII workaround)
+Documentation=https://docs.opsero.com
+# Run before the network is configured so the link is usable on the first DHCP
+# attempt. The script brings GEM0 up itself (the macb GEM is runtime-suspended
+# while its interface is down), so it does not depend on a network manager.
+Wants=network-pre.target
+Before=network-pre.target
+ConditionPathExists=/dev/mem
+
+[Service]
+Type=oneshot
+ExecStart=/usr/sbin/pcs-unisolate.sh
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

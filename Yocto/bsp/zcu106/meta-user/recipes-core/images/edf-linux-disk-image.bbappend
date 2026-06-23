@@ -12,4 +12,5 @@ IMAGE_INSTALL:append = " \
     can-utils \
     nfs-utils \
     pciutils \
+    pcs-unisolate \
 "

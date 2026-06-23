@@ -43,18 +43,18 @@ require a license to generate a bitstream with the AMD Xilinx tools.
 <!-- updater start -->
 ### Zynq UltraScale+ designs
 
-| Target board          | Target design      | Ports       | FMC Slot    | Standalone<br> Echo Server | PetaLinux | Vivado<br> Edition | IP<br>License |
-|-----------------------|--------------------|-------------|-------------|-------|-------|-------|-------|
-| [UltraZed-EV Carrier] | `uzev`             | 4x          | HPC         | :white_check_mark: | :white_check_mark: | Standard :free: | -     |
-| [ZCU102]              | `zcu102_hpc0`      | 4x          | HPC0        | :white_check_mark: | :white_check_mark: | Enterprise | -     |
-| [ZCU106]              | `zcu106_hpc0`      | 4x          | HPC0        | :white_check_mark: | :white_check_mark: | Standard :free: | -     |
-| [ZCU111]              | `zcu111`           | 4x          | FMCP        | :white_check_mark: | :white_check_mark: | Enterprise | -     |
+| Target board          | Target design      | Ports       | FMC Slot    | Standalone<br> Echo Server | PetaLinux | Yocto | Vivado<br> Edition | IP<br>License |
+|-----------------------|--------------------|-------------|-------------|-------|-------|-------|-------|-------|
+| [UltraZed-EV Carrier] | `uzev`             | 4x          | HPC         | :white_check_mark: | :white_check_mark: | :white_check_mark: | Standard :free: | -     |
+| [ZCU102]              | `zcu102_hpc0`      | 4x          | HPC0        | :white_check_mark: | :white_check_mark: | :white_check_mark: | Enterprise | -     |
+| [ZCU106]              | `zcu106_hpc0`      | 4x          | HPC0        | :white_check_mark: | :white_check_mark: | :white_check_mark: | Standard :free: | -     |
+| [ZCU111]              | `zcu111`           | 4x          | FMCP        | :white_check_mark: | :white_check_mark: | :white_check_mark: | Enterprise | -     |
 
 ### Versal designs
 
-| Target board          | Target design      | Ports       | FMC Slot    | Standalone<br> Echo Server | PetaLinux | Vivado<br> Edition | IP<br>License |
-|-----------------------|--------------------|-------------|-------------|-------|-------|-------|-------|
-| [VCK190]              | `vck190_fmcp1`     | 2x          | FMCP1       | :white_check_mark: | :white_check_mark: | Enterprise | -     |
+| Target board          | Target design      | Ports       | FMC Slot    | Standalone<br> Echo Server | PetaLinux | Yocto | Vivado<br> Edition | IP<br>License |
+|-----------------------|--------------------|-------------|-------------|-------|-------|-------|-------|-------|
+| [VCK190]              | `vck190_fmcp1`     | 2x          | FMCP1       | :white_check_mark: | :white_check_mark: | :white_check_mark: | Enterprise | -     |
 
 [UltraZed-EV Carrier]: https://www.xilinx.com/products/boards-and-kits/1-1s78dxb.html
 [ZCU102]: https://www.xilinx.com/zcu102

@@ -1,0 +1,58 @@
+// SPDX-License-Identifier: MIT
+// Copyright (C) 2025-2026, Opsero Electronic Design Inc.  All rights reserved.
+
+/*
+ * Ethernet FMC Max PS GEM port config: ports-01-- (ported from PetaLinux bsp/ports-01xx).
+ * Per-port wiring layered on the SDT-generated Linux device tree.
+ */
+
+/*
+ * Opsero Electronic Design Inc.
+ *
+ * Port config for designs using ports 0 and 1 of the Ethernet FMC Max,
+ * each driven by a PS GEM through EMIO GMII and a PL PCS/PMA (SGMII).
+ * Used by the Versal targets: the Versal PS has only two GEMs, so ports
+ * 2 and 3 of the Ethernet FMC Max are unused (PHYs held in reset).
+ *
+ * All four DP83867 PHYs of the Ethernet FMC Max share a single MDIO bus
+ * which is mastered by GEM0 in these designs. The PHY of port 1 is
+ * cross-referenced by gem1 via phy-handle.
+ *
+ * The PL PCS/PMA cores are NOT described here: this kernel's macb driver
+ * has no external-PCS support. They sit on GEM0's MDIO bus at address
+ * 8+port and power up ISOLATED (control reg 0, bit 10), which cuts the GMII
+ * datapath until cleared. The pcs-unisolate boot service clears that bit so
+ * traffic flows. Once the kernel gains an "xlnx,pcs" PCS driver, describe the
+ * cores here (pcs-handle) and drop that service. See docs/source/advanced.md.
+ */
+
+&gem0 {
+    local-mac-address = [00 0a 35 00 01 22];
+    phy-handle = <&extphy0>;
+    phy-mode = "gmii";
+    status = "okay";
+    xlnx,has-mdio = <0x1>;
+    ps_ethernet_0_mdio: mdio {
+        #address-cells = <1>;
+        #size-cells = <0>;
+        extphy0: phy@1 {
+            device_type = "ethernet-phy";
+            reg = <1>;
+            ti,fifo-depth = <0x1>;
+            enet-phy-lane-swap;
+        };
+        extphy1: phy@3 {
+            device_type = "ethernet-phy";
+            reg = <3>;
+            ti,fifo-depth = <0x1>;
+            enet-phy-lane-swap;
+        };
+    };
+};
+
+&gem1 {
+    local-mac-address = [00 0a 35 00 01 23];
+    phy-handle = <&extphy1>;
+    phy-mode = "gmii";
+    status = "okay";
+};

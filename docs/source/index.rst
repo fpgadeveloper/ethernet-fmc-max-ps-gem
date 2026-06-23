@@ -18,6 +18,7 @@ This is the documentation for the PS GEM (SGMII) reference designs for the `Ethe
    build_instructions
    echo_server
    petalinux
+   yocto
    advanced
    troubleshooting
    revision_history

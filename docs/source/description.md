@@ -33,7 +33,8 @@ Key points of the architecture:
 * **Maximum link speed is 1 Gbps:** The PS GEM EMIO GMII path supports 10M/100M/1G
   operation.
 
-```{note} Because the GEMs are routed to the FMC through EMIO in these designs, the
+```{note}
+Because the GEMs are routed to the FMC through EMIO in these designs, the
 development board's onboard Ethernet ports (normally wired to the GEMs through MIO)
 are not available.
 ```

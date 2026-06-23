@@ -111,8 +111,6 @@ set design_name ${target}
 set block_name psgem
 set board_url [lindex [dict get $target_dict $target] 0]
 set board_name [lindex [dict get $target_dict $target] 1]
-# Append Avnet bdf to the board repo paths (needed for Auboard)
-set_param board.repoPaths [concat [get_param board.repoPaths] [list [file normalize "../submodules/avnet-bdf"]]]
 set proj_board [get_board_parts "$board_url:$board_name:*" -latest_file_version]
 # Check if the board files are installed, if not, install them
 if { $proj_board == "" } {
@@ -218,6 +216,14 @@ if {$bd_script == "versal"} {
   set_property -name "steps.write_bitstream.args.readback_file" -value "0" -objects $obj
   set_property -name "steps.write_bitstream.args.verbose" -value "0" -objects $obj
 }
+
+# Waive known-benign CRITICAL WARNINGs during implementation. The hook runs inside
+# the impl run process before constraints are read / clocks derived. A set_msg_config
+# here in the build session would not reach that separate process, and set_msg_config
+# is not permitted inside .xdc files. See scripts/waive_critical_warnings.tcl.
+set_property -name {STEPS.INIT_DESIGN.TCL.PRE} \
+  -value [file normalize "$origin_dir/scripts/waive_critical_warnings.tcl"] \
+  -objects [get_runs impl_1]
 
 # set the current impl run
 current_run -implementation [get_runs impl_1]

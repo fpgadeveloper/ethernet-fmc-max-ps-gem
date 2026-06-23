@@ -4,7 +4,7 @@ This section is intended for users who want to modify the reference
 designs — adding IP to the block design, changing constraints, modifying
 the standalone application, or adding packages or drivers to the
 PetaLinux project. It describes how the design works, how the repository
-is laid out, how the Make-driven build flow works, how the Vitis and
+is laid out, how the build flow works, how the Vitis and
 PetaLinux sides are organised, and what modifications have been added on
 top of the stock AMD BSPs.
 
@@ -102,7 +102,8 @@ a `pcs-handle` on each `gem`), delete the `pcs-unisolate` recipe and its
 * **System clock:** 100 MHz PS fabric clock (`pl_clk0` / `pl0_ref_clk`)
   for the AXI interfaces.
 
-```{note} On the UltraZed-EV target the 50 MHz pl_clk1 is sourced from
+```{note}
+On the UltraZed-EV target the 50 MHz pl_clk1 is sourced from
 the IOPLL rather than the default RPLL — with the RPLL source the clock
 was not set to the correct frequency under PetaLinux on that board (see
 the comment in `bd_zynqmp.tcl`).
@@ -125,7 +126,9 @@ the comment in `bd_zynqmp.tcl`).
 
 ```
 .
-├── Makefile                   <- Top-level build entry point
+├── build.py                   <- Cross-platform build runner (the build logic)
+├── build.sh / build.bat       <- Shims that invoke build.py (Linux/git bash, Windows)
+├── Makefile                   <- Deprecated thin wrapper around build.sh (removed next version)
 ├── README.md
 ├── config/                    <- Source-of-truth design metadata and auto-generation
 │   ├── data.json
@@ -133,13 +136,10 @@ the comment in `bd_zynqmp.tcl`).
 ├── docs/                      <- This documentation (Sphinx + Read the Docs)
 ├── EmbeddedSw/                <- Patched lwIP sources used by the Vitis build
 ├── PetaLinux/
-│   ├── Makefile               <- PetaLinux build orchestration
 │   └── bsp/                   <- Per-board and per-port-config BSP fragments
 │       ├── uzev/, zcu102/, vck190/, …   <- board-specific overlays
 │       └── ports-0123/, ports-01xx/     <- port-config overlays
-├── submodules/                <- Vendor board definition files (BDFs)
 ├── Vivado/
-│   ├── Makefile               <- Vivado build orchestration
 │   ├── scripts/
 │   │   ├── build.tcl          <- Project creation + block design assembly
 │   │   └── xsa.tcl            <- Synthesis, implementation, XSA export
@@ -151,7 +151,6 @@ the comment in `bd_zynqmp.tcl`).
 │       └── constraints/
 │           └── <target>.xdc   <- One XDC per target (pin assignments, timing)
 └── Vitis/
-    ├── Makefile               <- Vitis workspace + boot-image orchestration
     ├── py/
     │   ├── args.json          <- Repo-specific Vitis flow configuration
     │   ├── build-vitis.py     <- Universal Vitis Python build driver
@@ -170,8 +169,8 @@ committed.
 
 ## Target naming
 
-A `TARGET` is the canonical handle for a single design and is the only
-parameter passed through the build flow. It encodes the board and, for
+A *target label* is the canonical handle for a single design and is passed
+to every build command via `--target`. It encodes the board and, for
 boards with multiple FMC connectors, the connector:
 
 ```
@@ -180,65 +179,75 @@ boards with multiple FMC connectors, the connector:
 
 Examples: `uzev`, `vck190_fmcp1`, `zcu102_hpc0`, `zcu106_hpc0`,
 `zcu111`. The first underscore-delimited token is taken as the
-*target board* and is what `PetaLinux/Makefile` uses to select the BSP
+*target board* and is what the build runner uses to select the BSP
 under `PetaLinux/bsp/<board>/`.
 
-The complete list of valid targets is in the `UPDATER START` block of
-each Makefile and is generated from `config/data.json` (see below).
+The complete list of valid targets comes from `config/data.json`; run
+`./build.sh list` (or `./build.sh labels` for one per line) to print it.
 
 ## `config/data.json` and `config/update.py`
 
 `config/data.json` is the canonical source of truth for the set of
 supported designs and their per-target metadata (board name, processor
 family, FMC connector, port lane mapping, baremetal-vs-PetaLinux
-support, etc.). `config/update.py` reads `data.json` and regenerates
-the auto-managed sections of the four Makefiles, the top-level
-`README.md`, and `.gitignore` — the sections delimited by
+support, etc.). The `build.py` runner reads it directly at runtime, so
+the target list is never hand-maintained.
+
+`config/update.py` reads `data.json` and regenerates the auto-managed
+documentation and metadata that is *not* read at runtime: the target
+tables in the top-level `README.md`, the `.gitignore`, and the residual
+per-board section still embedded in `PetaLinux/Makefile` — delimited by
 `UPDATER START` / `UPDATER END` comment markers.
 
 When adding or modifying a target, edit `data.json` and re-run
 `update.py`. Do not hand-edit content between the `UPDATER START` /
 `UPDATER END` markers; it will be overwritten on the next regeneration.
 
-## Make-driven build flow
+## Build runner
 
-There are four Makefiles in the repository, each scoped to a stage of
-the build:
+All build stages are driven by the cross-platform `build.py` runner at the
+root of the repository, invoked through the `build.sh` shim on Linux / git
+bash or `build.bat` on Windows (identical arguments). It reads the target
+list and per-target attributes straight from `config/data.json`, builds
+whatever a requested stage depends on automatically, skips anything already
+built, and locates and sources the AMD tools itself — so there is no need to
+source the Vivado / Vitis / PetaLinux settings scripts beforehand.
 
-| Makefile              | Scope                                                                                          |
-|-----------------------|------------------------------------------------------------------------------------------------|
-| `./Makefile`          | Top-level orchestration; assembles boot-image zips for one or all targets.                     |
-| `./Vivado/Makefile`   | Creates the Vivado project, runs synthesis and implementation, exports the XSA.                |
-| `./Vitis/Makefile`    | Creates the Vitis workspace and platform from the XSA, builds the standalone application, packages BOOT.BIN. |
-| `./PetaLinux/Makefile`| Creates the PetaLinux project from the XSA, applies BSP overlays, builds, packages.            |
+The build is organised into stages, each available as a sub-command:
 
-A `make bootimage TARGET=<t>` invocation at the top level cascades:
+| Command      | Stage                                                                                 |
+|--------------|---------------------------------------------------------------------------------------|
+| `project`    | Create the Vivado project (`.xpr`) and block design.                                  |
+| `xsa`        | Synthesise, implement and export the hardware (`.xsa`).                               |
+| `standalone` | Create the Vitis workspace, build the baremetal app, package `BOOT.BIN`.             |
+| `petalinux`  | Create the PetaLinux project from the XSA, apply the BSP overlays, build and package. |
+| `package`    | Gather the built boot artifacts into `bootimages/*.zip`.                              |
+| `all`        | Build every stage the target supports, then `package`.                               |
+
+Run `./build.sh list` to see the targets and their attributes, `./build.sh
+status --target <t>` for per-stage artifact state, and `./build.sh --help`
+for the full command list.
+
+Each target is flagged in `config/data.json` for the stages it supports.
+Because each stage builds its prerequisites first, a single `./build.sh all
+--target <t>` cascades the whole pipeline:
 
 ```
-make bootimage TARGET=t
-  -> Vitis side:
-       Vitis/Makefile workspace TARGET=t -> bootfile TARGET=t
-         -> ensures Vivado XSA exists
-              Vivado/Makefile xsa TARGET=t
-                -> vivado -mode batch -source scripts/build.tcl   (creates project)
-                -> vivado -mode batch -source scripts/xsa.tcl     (synth, impl, XSA export)
-         -> python3 py/build-vitis.py  ... (creates platform + app, builds)
-         -> python3 py/make-boot.py    ... (packages BOOT.BIN)
-  -> PetaLinux side:
-       PetaLinux/Makefile petalinux TARGET=t
-         -> petalinux-create --template <zynqMP|versal> --name t
-         -> petalinux-config --get-hw-description <XSA>
-         -> copy bsp/<board>/project-spec/* into the project       (board BSP)
-         -> copy bsp/<port-config>/project-spec/* into the project (overlay)
-         -> petalinux-config --silentconfig
-         -> petalinux-build
-         -> petalinux-package boot ...
-  -> zip the resulting boot files into bootimages/
+./build.sh all --target t
+  -> xsa         : vivado creates the project (build.tcl), then synth/impl/XSA export (xsa.tcl)
+  -> standalone  : vitis builds the platform + app, packages BOOT.BIN
+  -> petalinux   : petalinux-create -> -config --get-hw-description <XSA>
+                   -> copy bsp/<board>/project-spec/* (board BSP) + bsp/<port-config>/project-spec/* (overlay)
+                   -> petalinux-build -> petalinux-package
+  -> package     : zip the boot files into bootimages/
 ```
 
-Per-target lock files (`.<target>.lock` in each Makefile's directory)
-prevent two concurrent builds of the same target from clobbering each
-other.
+Build a single stage on its own with `./build.sh <stage> --target <t>`; the
+runner still builds any missing prerequisite stages first.
+
+Per-target lock files (`.<target>.lock` at the repository root) prevent two
+concurrent builds of the same target from clobbering each other — so two
+terminals can safely both run `./build.sh all --target all`.
 
 ## Vivado side
 
@@ -288,10 +297,10 @@ self-contained.
 
 * `Vivado/scripts/build.tcl` creates the Vivado project, adds the
   target's XDC, sources the appropriate `bd_*.tcl`, and validates the
-  block design. Invoked via `make project TARGET=<t>`.
+  block design. Invoked via `./build.sh project --target <t>`.
 * `Vivado/scripts/xsa.tcl` opens the existing project, runs synthesis
   and implementation, exports the XSA, and writes the bitstream into
-  the implementation run directory. Invoked via `make xsa TARGET=<t>`.
+  the implementation run directory. Invoked via `./build.sh xsa --target <t>`.
 
 Both scripts check `XILINX_VIVADO` to confirm the installed Vivado
 version matches the `version_required` constant at the top of the
@@ -307,16 +316,16 @@ wrap the additions in the appropriate per-board conditional block.
 
 Once the script is edited, delete any existing per-target Vivado
 project directory (`rm -rf Vivado/<target>`) and re-run the Vivado
-build through the Makefile:
+build:
 
 ```
-make -C Vivado xsa TARGET=<target>
+./build.sh xsa --target <target>
 ```
 
 This re-creates the project, sources the modified BD script, runs
 `validate_bd_design`, synthesises, implements, and re-exports the XSA.
 Downstream Vitis / PetaLinux / boot-image steps will pick up the new
-XSA on the next `make` at the top level.
+XSA on the next build.
 
 ### Adding or modifying constraints
 
@@ -344,7 +353,6 @@ programming at startup via the `vadj.c` / `vadj.h` files in
 
 ```
 Vitis/
-├── Makefile
 ├── py/
 │   ├── args.json
 │   ├── build-vitis.py        <- Universal Vitis Python build driver
@@ -407,10 +415,10 @@ local `embeddedsw` repository. The patches:
 
 ### Modifying the standalone application
 
-Edit `Vitis/common/src/*.c` directly. The next `make -C Vitis bootfile
-TARGET=<t>` rebuilds the application against the existing platform; if
+Edit `Vitis/common/src/*.c` directly. The next `./build.sh standalone
+--target <t>` rebuilds the application against the existing platform; if
 you've changed the hardware (XSA) you'll need a fresh workspace
-(`make -C Vitis clean TARGET=<t>` first).
+(`./build.sh clean --target <t> --stage standalone` first).
 
 ### Modifying BSP libraries or build hooks
 
@@ -436,10 +444,10 @@ directory:
    the device-tree fragment that wires up the GEMs and PHYs active on
    this target.
 
-The mapping from target to (board BSP, port-config overlay) is encoded
-in `PetaLinux/Makefile`'s `UPDATER` block. The last column names the
-port-config overlay; the board BSP is derived from the first token of
-the target name.
+The mapping from target to (board BSP, port-config overlay) is defined in
+`config/data.json` (and surfaced by `./build.sh list`): the port-config
+overlay comes from the target's metadata, and the board BSP is derived
+from the first token of the target name.
 
 The two port-config variants are:
 

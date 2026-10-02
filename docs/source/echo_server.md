@@ -24,11 +24,18 @@ The build script does the following:
    [below](#change-the-target-port).
 
 The lwIP modifications (in `EmbeddedSw/`, applied to
-`xemacpsif_physpeed.c`) account for the specifics of these designs: the
-four DP83867 PHYs share one MDIO bus mastered by GEM0, so GEM0's PHY
-detection is restricted to the port 0 PHY at address 1; and the TI PHYs are
-always managed through their SGMII speed path, since the GEMs connect to
-them through EMIO GMII and a PCS/PMA core.
+`xemacpsif_physpeed.c`) account for the specifics of these designs:
+
+* the four DP83867 PHYs share one MDIO bus mastered by GEM0, so GEM0's PHY
+  detection is restricted to the port 0 PHY at address 1, and the other GEMs
+  reach their PHY and PCS/PMA core through GEM0's bus;
+* the PCS/PMA core of the selected port powers up with its ISOLATE bit set, so
+  the application clears it (over MDIO, address 8 + port) before it brings the
+  port up;
+* on the VCK190, the PHY resets (PMC GPIO, EMIO bits) are pulsed once, after
+  VADJ has been switched on;
+* the TI PHYs are always managed through their SGMII speed path, since the
+  GEMs connect to them through EMIO GMII and a PCS/PMA core.
 
 ## Building the Vitis workspace
 
@@ -77,10 +84,29 @@ Gateway : 192.168.2.1
 TCP echo server started @ port 7
 ```
 
+When the port is brought up, the application also prints
+`PCS/PMA core of port <n>: isolate cleared` as it releases the PCS/PMA core of the
+selected port.
+
 On the VCK190 you'll also see a PLM banner and a `VADJ: 1.5V enabled successfully`
 line ahead of the echo-server header — `vadj_enable(VADJ_1V5)` runs at the top of `main()`
 to bring the FMC adjustable rail up to 1.5V via the on-board power controller before the
-PHYs are released from reset (see `Vitis/common/src/vadj.c`).
+PHYs are released from reset (see `Vitis/common/src/vadj.c`). The PHY reset pulse that
+follows is reported with `PHY reset asserted` / `PHY reset released` lines.
+
+## Boot from SD card
+
+Instead of running the application from the Vitis GUI, you can boot it from an SD card.
+The build packages the application, the bitstream and the boot loaders into
+`Vitis/boot/<target>/BOOT.BIN` (also in
+`bootimages/ethernet-fmc-max-ps-gem_<target>_standalone-2025-2.zip`).
+
+1. Copy `BOOT.BIN` to the first partition (FAT32) of an SD card.
+2. Plug the card into the board and set the boot mode switches to SD card boot (see the
+   switch settings in [Boot PetaLinux](petalinux.md#boot-petalinux)).
+3. Connect the Ethernet FMC Max and an Ethernet cable on port 0 (the default port; see
+   [Change the target port](#change-the-target-port)), open the UART terminal and power up
+   the board.
 
 ## UART settings
 

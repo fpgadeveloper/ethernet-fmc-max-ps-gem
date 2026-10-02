@@ -20,7 +20,7 @@ Important links:
 
 ## Requirements
 
-This project is designed for version 2025.2 of the Xilinx tools (Vivado/Vitis/PetaLinux). 
+This project is designed for version 2025.2 of the Xilinx tools (Vivado/Vitis/PetaLinux/Yocto EDF). 
 If you are using an older version of the Xilinx tools, then refer to the 
 [release tags](https://github.com/fpgadeveloper/ethernet-fmc-max-ps-gem/tags "releases")
 to find the version of this repository that matches your version of the tools.
@@ -29,7 +29,7 @@ In order to test this design on hardware, you will need the following:
 
 * Vivado 2025.2
 * Vitis 2025.2
-* PetaLinux Tools 2025.2
+* PetaLinux Tools 2025.2 (PetaLinux flow), or Google's `repo` tool (Yocto flow)
 * [Ethernet FMC Max]
 * One of the target platforms listed below
 
@@ -43,18 +43,18 @@ require a license to generate a bitstream with the AMD Xilinx tools.
 <!-- updater start -->
 ### Zynq UltraScale+ designs
 
-| Target board          | Target design      | Ports       | FMC Slot    | Standalone<br> Echo Server | PetaLinux | Vivado<br> Edition | IP<br>License |
-|-----------------------|--------------------|-------------|-------------|-------|-------|-------|-------|
-| [UltraZed-EV Carrier] | `uzev`             | 4x          | HPC         | :white_check_mark: | :white_check_mark: | Standard :free: | -     |
-| [ZCU102]              | `zcu102_hpc0`      | 4x          | HPC0        | :white_check_mark: | :white_check_mark: | Enterprise | -     |
-| [ZCU106]              | `zcu106_hpc0`      | 4x          | HPC0        | :white_check_mark: | :white_check_mark: | Standard :free: | -     |
-| [ZCU111]              | `zcu111`           | 4x          | FMCP        | :white_check_mark: | :white_check_mark: | Enterprise | -     |
+| Target board          | Target design      | Ports       | FMC Slot    | Standalone<br> Echo Server | PetaLinux | Yocto | Vivado<br> Edition | IP<br>License |
+|-----------------------|--------------------|-------------|-------------|-------|-------|-------|-------|-------|
+| [UltraZed-EV Carrier] | `uzev`             | 4x          | HPC         | :white_check_mark: | :white_check_mark: | :white_check_mark: | Standard :free: | -     |
+| [ZCU102]              | `zcu102_hpc0`      | 4x          | HPC0        | :white_check_mark: | :white_check_mark: | :white_check_mark: | Enterprise | -     |
+| [ZCU106]              | `zcu106_hpc0`      | 4x          | HPC0        | :white_check_mark: | :white_check_mark: | :white_check_mark: | Standard :free: | -     |
+| [ZCU111]              | `zcu111`           | 4x          | FMCP        | :white_check_mark: | :white_check_mark: | :white_check_mark: | Enterprise | -     |
 
 ### Versal designs
 
-| Target board          | Target design      | Ports       | FMC Slot    | Standalone<br> Echo Server | PetaLinux | Vivado<br> Edition | IP<br>License |
-|-----------------------|--------------------|-------------|-------------|-------|-------|-------|-------|
-| [VCK190]              | `vck190_fmcp1`     | 2x          | FMCP1       | :white_check_mark: | :white_check_mark: | Enterprise | -     |
+| Target board          | Target design      | Ports       | FMC Slot    | Standalone<br> Echo Server | PetaLinux | Yocto | Vivado<br> Edition | IP<br>License |
+|-----------------------|--------------------|-------------|-------------|-------|-------|-------|-------|-------|
+| [VCK190]              | `vck190_fmcp1`     | 2x          | FMCP1       | :white_check_mark: | :white_check_mark: | :white_check_mark: | Enterprise | -     |
 
 [UltraZed-EV Carrier]: https://www.xilinx.com/products/boards-and-kits/1-1s78dxb.html
 [ZCU102]: https://www.xilinx.com/zcu102
@@ -75,14 +75,19 @@ Notes:
 
 ## Software
 
-These reference designs can be driven by either a standalone application or within a PetaLinux environment. 
-The repository includes all necessary scripts and code to build both environments. The table 
-below outlines the corresponding applications available in each environment:
+These reference designs can be driven by a standalone application or by embedded Linux,
+built with either PetaLinux or Yocto (AMD EDF). The repository includes all necessary scripts
+and code to build all three. The table below outlines the corresponding applications
+available in each environment:
 
 | Environment      | Available Applications  |
 |------------------|-------------------------|
 | Standalone       | lwIP Echo Server |
 | PetaLinux        | Built-in Linux commands<br>Additional tools: ethtool, phytool, iperf3 |
+| Yocto (EDF)      | Built-in Linux commands<br>Additional tools: ethtool, phytool, iperf3, mtd-utils, can-utils, nfs-utils, pciutils |
+
+Both Linux images include the `pcs-unisolate` boot service, which clears the ISOLATE bit of
+the PL PCS/PMA cores so that the ports pass traffic.
 
 ## Build instructions
 
@@ -131,6 +136,16 @@ bit file, depending on the device family):
 ./build.sh petalinux --target <target>
 ```
 
+#### Build Yocto (Linux only)
+
+```
+./build.sh yocto --target <target>
+```
+
+The Yocto build produces a complete SD card image (`rootfs.wic.xz`). After writing it to the
+card, copy `BOOT.BIN` (and on the VCK190 `BOOTAA64.EFI`, into `EFI/BOOT/`) onto the card's
+first partition; see the Yocto section of the user guide.
+
 #### Build everything
 
 Builds all of the above that the target supports, then gathers the boot
@@ -141,7 +156,8 @@ images into `bootimages/*.zip`:
 ./build.sh all --target all          # every target in the repo
 ```
 
-Also available: `status`, `clean`, `project` — see
+Also available: `status`, `clean` (with `--keep-boot` to delete only the intermediate
+files), `package`, `project` — see
 `./build.sh --help`. On Windows, the PetaLinux and Yocto stages require a
 Linux machine; the runner says so and prints the hand-off command. The
 legacy `make` interface still works on Linux (each Makefile now wraps

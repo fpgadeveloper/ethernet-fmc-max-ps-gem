@@ -3,10 +3,13 @@
 This section is intended for users who want to modify the reference
 designs — adding IP to the block design, changing constraints, modifying
 the standalone application, or adding packages or drivers to the
-PetaLinux project. It describes how the design works, how the repository
-is laid out, how the build flow works, how the Vitis and
-PetaLinux sides are organised, and what modifications have been added on
-top of the stock AMD BSPs.
+PetaLinux or Yocto project. It describes how the design works, how the
+repository is laid out, how the build flow works, how the Vitis,
+PetaLinux and Yocto sides are organised, and what modifications have been
+added on top of the stock AMD BSPs.
+
+The block diagrams of the design are on the [Description](description.md#block-diagrams)
+page.
 
 The actual *build* instructions are in [build_instructions](build_instructions);
 this section is about understanding the project well enough to modify
@@ -61,16 +64,29 @@ DHCP never completes. The bit must be cleared over MDIO; this is the
 standard step in AMD's own software (`get_Xilinx_pcs_pma_phy_speed()`).
 
 * **Bare-metal:** `xemacpsif_physpeed.c` clears it
-  (`pcs_pma_release_isolate()`) before bringing each port up.
-* **U-Boot:** the `pcs_isolate_clr` environment block clears it before
-  `distro_bootcmd`.
+  (`pcs_pma_release_isolate()`) before bringing each port up, and prints
+  `PCS/PMA core of port <n>: isolate cleared`.
+* **U-Boot:** does not clear it. U-Boot does not use the Ethernet ports
+  in these designs.
 * **Linux:** the `macb` driver does not manage the PCS (the GEM's
   `phy-handle` points at the external DP83867, and this kernel has no
   external-PCS support), so a small systemd one-shot — `pcs-unisolate`
   (`recipes-apps/pcs-unisolate`) — brings GEM0 up and clears ISOLATE on
   every responding core (MDIO 8–11) before the network is configured.
-  It is force-installed via `IMAGE_INSTALL` in each board's
-  `petalinuxbsp.conf`.
+  It writes control register 0 of each isolated core to `0x1140`
+  (auto-negotiation enabled and restarted, ISOLATE clear) and logs each
+  core to the kernel log (`dmesg | grep pcs-unisolate`). It uses
+  `phytool` (through the kernel MDIO bus) when it is installed, and
+  otherwise drives GEM0's PHY maintenance register directly with
+  `devmem`. The script finds GEM0's base address (`0xFF0B0000` on
+  Zynq UltraScale+, `0xFF0C0000` on Versal) by checking the SoC in the
+  device tree; it looks at both the root `compatible` and the GEM nodes'
+  `compatible`, because the device tree of the Yocto flow names only the
+  board in its root `compatible`. The recipe is part of the port-config
+  overlays (`PetaLinux/bsp/ports-*/` and `Yocto/bsp/port-configs/ports-*/`)
+  and is installed by `IMAGE_INSTALL` in each board's
+  `petalinuxbsp.conf` (PetaLinux) or `edf-linux-disk-image.bbappend`
+  (Yocto).
 
 ```{note}
 **The Linux service is a stop-gap and should be removed once the kernel
@@ -115,8 +131,13 @@ the comment in `bd_zynqmp.tcl`).
   `proc_sys_reset` block, so the PHYs are released automatically when
   the PS comes up.
 * **Versal:** the PHY resets are driven by PMC GPIO EMIO bits 0 and 1,
-  giving software control of the PHY resets (the standalone application
-  and PetaLinux release them through the GPIO).
+  giving software control of the PHY resets. Because the reset signals
+  are FMC I/Os, they only work once VADJ is on, so the PHYs are reset
+  after VADJ has been switched on: by the standalone application (VADJ
+  in `main()`, PHY reset in lwIP's `detect_phy()`), and by U-Boot in the
+  PetaLinux and Yocto images (boot command `vadj_1v5_en` + `phy_reset`
+  in PetaLinux; the same register writes in the Yocto U-Boot
+  configuration fragment `vck190-vadj-phyreset-bootcmd.cfg`).
 * Unused ports' PHY resets are tied low (held in reset).
 * An AXI GPIO (10-bit, input only) is connected to the FMC power-good
   signals (2 bits) and the PHY GPIO signals (2 per port) for optional
@@ -139,6 +160,11 @@ the comment in `bd_zynqmp.tcl`).
 │   └── bsp/                   <- Per-board and per-port-config BSP fragments
 │       ├── uzev/, zcu102/, vck190/, …   <- board-specific overlays
 │       └── ports-0123/, ports-01xx/     <- port-config overlays
+├── Yocto/
+│   ├── scripts/               <- Yocto / EDF build engine (called by build.py)
+│   └── bsp/
+│       ├── uzev/, zcu102/, vck190/, …   <- per-board layers + local.conf.append
+│       └── port-configs/ports-0123/, ports-01xx/  <- port-config overlay layers
 ├── Vivado/
 │   ├── scripts/
 │   │   ├── build.tcl          <- Project creation + block design assembly
@@ -163,7 +189,7 @@ the comment in `bd_zynqmp.tcl`).
 ```
 
 Per-target build outputs are written to `Vivado/<target>/`,
-`Vitis/<target>_workspace/`, and `PetaLinux/<target>/`; packaged
+`Vitis/<target>_workspace/`, `PetaLinux/<target>/` and `Yocto/<target>/`; packaged
 boot-image zips are written to `bootimages/`. None of these are
 committed.
 
@@ -221,8 +247,10 @@ The build is organised into stages, each available as a sub-command:
 | `xsa`        | Synthesise, implement and export the hardware (`.xsa`).                               |
 | `standalone` | Create the Vitis workspace, build the baremetal app, package `BOOT.BIN`.             |
 | `petalinux`  | Create the PetaLinux project from the XSA, apply the BSP overlays, build and package. |
-| `package`    | Gather the built boot artifacts into `bootimages/*.zip`.                              |
+| `yocto`      | Generate a System Device Tree and Yocto MACHINE from the XSA, apply the BSP layers, build the EDF disk image. |
+| `package`    | Gather the built boot artifacts into `bootimages/*.zip` (rewrites a zip that is older than its artifacts). |
 | `all`        | Build every stage the target supports, then `package`.                               |
+| `clean`      | Delete a target's generated outputs; `--keep-boot` deletes only the intermediates and keeps the boot files. |
 
 Run `./build.sh list` to see the targets and their attributes, `./build.sh
 status --target <t>` for per-stage artifact state, and `./build.sh --help`
@@ -239,6 +267,9 @@ Because each stage builds its prerequisites first, a single `./build.sh all
   -> petalinux   : petalinux-create -> -config --get-hw-description <XSA>
                    -> copy bsp/<board>/project-spec/* (board BSP) + bsp/<port-config>/project-spec/* (overlay)
                    -> petalinux-build -> petalinux-package
+  -> yocto       : repo sync (first build) -> sdtgen + gen-machineconf parse-sdt <XSA>
+                   -> add bsp/<board>/ + bsp/port-configs/<port-config>/ layers
+                   -> bitbake edf-linux-disk-image -> gather images/linux/
   -> package     : zip the boot files into bootimages/
 ```
 
@@ -341,13 +372,13 @@ PS GEM. The application source is shared across all targets; per-target
 specialisation is handled by the build driver, not by per-target
 source.
 
-The Ethernet FMC Max requires the FMC adjustable I/O voltage rail (VADJ)
-to be programmed to 1.5V before the on-board PHYs come out of reset. On
-the Versal target (VCK190), the standalone application performs that
-programming at startup via the `vadj.c` / `vadj.h` files in
-`common/src` (the entry point in `main.c` calls
-`vadj_enable(VADJ_1V5)`). The ZynqMP boards rely on the FSBL
-(ZCU102/ZCU106) or board-default rails to bring VADJ up.
+On the Versal target (VCK190), the FMC adjustable I/O voltage rail
+(VADJ) must be programmed to 1.5V before the on-board PHYs can come out
+of reset. The standalone application performs that programming at
+startup via the `vadj.c` / `vadj.h` files in `common/src` (the entry
+point in `main.c` calls `vadj_enable(VADJ_1V5)`). The ZynqMP boards
+(VADJ = 1.8V) rely on the FSBL (ZCU102/ZCU106) or board-default rails
+to bring VADJ up.
 
 ### Layout
 
@@ -404,8 +435,13 @@ local `embeddedsw` repository. The patches:
   bus with all four PHYs (addresses 1, 3, 12, 15). The stock scan would
   find all four and block on auto-negotiation of ports with no cable
   attached, so GEM0 is restricted to the port 0 PHY at address 1.
-  GEM1-3 each see only their PCS/PMA core's management interface
-  (address 9) on their own bus, so the generic scan is fine for them.
+  GEM1-3 have no MDIO bus of their own; their PHYs and PCS/PMA cores
+  are reached through GEM0's bus.
+* **PCS/PMA ISOLATE release** — before a port is brought up, the
+  ISOLATE bit of its PCS/PMA core (MDIO address 8 + port, on GEM0's
+  bus) is cleared (see above).
+* **Versal PHY reset** — on Versal, `detect_phy` first pulses the PHY
+  resets through PMC GPIO bank 3 (EMIO bits 0-3), once.
 * **TI PHYs always take the SGMII speed path** — the DP83867 PHYs are
   always in SGMII mode in these designs, but the hardware handoff
   reports the MAC-side interface (`gmii`), so the TI speed routine is
@@ -597,6 +633,12 @@ the stock one?"* — it is what to re-apply if you ever do that.
   through PSU SD1 instead of SD0.
 * **Custom `system-user.dtsi`** with UZ-EV-specific peripheral
   configuration (overwrites the file copied in from a stock UZ-EV BSP).
+  Unlike the stock UZ-EV BSP, it does **not** describe `gem3` as the
+  carrier's RJ45 port (RGMII PHY at address 0, MAC address from the
+  EEPROM): in this design GEM3 drives FMC port 3 and is described by the
+  `ports-0123` port-config overlay only. A board description of `gem3`
+  would be merged into the same device-tree node and conflict with the
+  port-config. The Yocto `uzev` BSP follows the same rule.
 
 ### Port-config overlays
 
@@ -606,6 +648,40 @@ wires up the GEMs and PHYs. Each contains a single
 `port-config.dtsi` (the surrounding directory structure is needed so
 that Yocto picks it up via the `SRC_URI:append = " file://port-config.dtsi"`
 line in `device-tree.bbappend`).
+
+## Yocto side
+
+The Yocto flow uses AMD's Embedded Development Framework (EDF). Instead
+of a fixed AMD machine configuration, it generates a Yocto MACHINE
+(`psgem-<target>`) and the device trees from the target's own XSA
+(`sdtgen` → System Device Tree → `gen-machineconf parse-sdt`), so a
+change to the PS configuration in Vivado flows through automatically.
+The PL bitstream is embedded in `BOOT.BIN`.
+
+On top of the generated configuration, the build adds two layers per
+target, both under `Yocto/bsp/`:
+
+1. The **board layer** `bsp/<board>/` (`conf/local.conf.append` for the
+   hostname and the extra kernel arguments, and `meta-user/` for the
+   device-tree fixes, the kernel configuration, the root filesystem
+   packages and, on the VCK190, the U-Boot boot command).
+2. The **port-config overlay layer** `bsp/port-configs/<port-config>/`
+   (`ports-0123` or `ports-01xx`): the same `port-config.dtsi` and
+   `pcs-unisolate` recipe as the PetaLinux port-config overlays.
+
+The content of these layers, the kernel command line and the outputs are
+described on the [Yocto](yocto.md#how-the-image-is-put-together) page;
+the build scripts are described in `Yocto/README.md`.
+
+To add a package to the Yocto root filesystem, add it to
+`IMAGE_INSTALL:append` in
+`Yocto/bsp/<board>/meta-user/recipes-core/images/edf-linux-disk-image.bbappend`.
+Kernel options go into
+`Yocto/bsp/<board>/meta-user/recipes-kernel/linux/linux-xlnx/bsp.cfg`,
+and device-tree changes into the board's `system-user.dtsi` or the
+target's `port-config.dtsi`. After changing `conf/local.conf.append`,
+delete `Yocto/<target>/configdone.txt` so that the next build
+re-applies the configuration.
 
 ## Where build outputs land
 
@@ -619,6 +695,8 @@ line in `device-tree.bbappend`).
 | `PetaLinux/<target>/`               | PetaLinux project. All Yocto build state lives here.                            |
 | `PetaLinux/<target>/images/linux/`  | `BOOT.BIN`, `image.ub`, `boot.scr`, `rootfs.tar.gz`, etc.                       |
 | `PetaLinux/<target>/build/build.log`| PetaLinux build log.                                                            |
-| `bootimages/`                       | Per-target zipped boot files (`<prj>_<target>_petalinux-<ver>.zip` and `<prj>_<target>_standalone-<ver>.zip`). |
+| `Yocto/<target>/`                   | Yocto workspace (sources, build directory).                                     |
+| `Yocto/<target>/images/linux/`      | `rootfs.wic.xz` + `.bmap` (SD card image), `BOOT.BIN`, `Image`, `system.dtb`, etc. |
+| `bootimages/`                       | Per-target zipped boot files (`<prj>_<target>_standalone-<ver>.zip`, `<prj>_<target>_petalinux-<ver>.zip` and `<prj>_<target>_yocto-<ver>.zip`). |
 
 None of these directories are committed to the repository.

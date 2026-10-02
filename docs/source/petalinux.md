@@ -33,6 +33,12 @@ the full description of the runner.
 This will also launch the build process for the corresponding Vivado project if that project
 has not already been built and its hardware exported.
 
+The output products are written to `PetaLinux/<target>/images/linux/`. The files that you need
+for the SD card are `BOOT.BIN`, `boot.scr`, `image.ub` and `rootfs.tar.gz`;
+`./build.sh package --target <target>` gathers them into
+`bootimages/ethernet-fmc-max-ps-gem_<target>_petalinux-2025-2.zip` (boot files under `boot/`,
+the root filesystem under `root/`).
+
 ## Boot from SD card
 
 ### Prepare the SD card
@@ -190,6 +196,9 @@ the board.
 * `eth2`: Ethernet FMC Max Port 2 (GEM2, PHY @ MDIO addr 12)
 * `eth3`: Ethernet FMC Max Port 3 (GEM3, PHY @ MDIO addr 15)
 
+On the UltraZed-EV, GEM3 is FMC port 3 like on the other boards: the carrier's own RJ45 port
+(normally driven by GEM3) is not available in this design.
+
 ### Versal design (vck190_fmcp1)
 
 The Versal PS has two GEM controllers, so this design supports ports 0 and 1 of the
@@ -197,6 +206,11 @@ Ethernet FMC Max (the PHYs of ports 2 and 3 are held in reset):
 
 * `eth0`: Ethernet FMC Max Port 0 (GEM0, PHY @ MDIO addr 1)
 * `eth1`: Ethernet FMC Max Port 1 (GEM1, PHY @ MDIO addr 3)
+
+On the VCK190, the FMC I/O voltage (VADJ, 1.5 V) is not on at power-up, and the PHY reset
+signals are FMC I/Os. The U-Boot of this design therefore switches VADJ on and then pulses the
+PHY resets (`run vadj_1v5_en; run phy_reset` in its boot command, defined in the BSP's
+`platform-top.h`) before it boots Linux.
 
 ```{note}
 The development board's onboard Ethernet ports are normally driven by the
@@ -211,8 +225,10 @@ targets in this repo.
 
 ### Log in
 
-Log in with the username `petalinux`. On first boot you will be asked to choose a
-password; the examples below assume that the `sudo` prefix is used where needed.
+The login prompt shows the hostname of the image, `<board>-psgem-sgmii-2025-2` (for example
+`zcu106-psgem-sgmii-2025-2`). Log in with the username `petalinux`. On first boot you will be
+asked to choose a password; the examples below assume that the `sudo` prefix is used where
+needed.
 
 ### Enable port
 
@@ -314,6 +330,41 @@ PING 192.168.2.98 (192.168.2.98): 56 data bytes
 64 bytes from 192.168.2.98: seq=3 ttl=64 time=0.161 ms
 ```
 
+
+### Check the PCS/PMA cores
+
+The ports pass traffic only after the `pcs-unisolate` boot service has cleared the ISOLATE
+bit of the PCS/PMA cores (see
+[PCS/PMA ISOLATE bit](advanced.md#pcspma-isolate-bit-and-the-pcs-unisolate-service)). Its
+messages are in the kernel log:
+
+```
+zcu106-psgem-sgmii-2025-2:~$ dmesg | grep pcs-unisolate
+```
+
+Each core should be reported as cleared (`ISOLATE cleared`) or as already de-isolated. You can
+also read control register 0 of each core directly with `phytool`, through GEM0's interface
+`eth0` (the cores are at MDIO addresses 8 + port). `0x1140` means that the core is
+de-isolated, `0x1540` that it is still isolated:
+
+```
+zcu106-psgem-sgmii-2025-2:~$ for a in 8 9 10 11; do sudo phytool read eth0/$a/0; done
+```
+
+### Measure throughput with iperf3
+
+Start `iperf3 -s` on a PC that is reachable through the port under test, then run the client
+on the board in both directions (replace the address with your PC's address):
+
+```
+zcu106-psgem-sgmii-2025-2:~$ iperf3 -c 192.168.2.98 -B 192.168.2.30 -t 10
+zcu106-psgem-sgmii-2025-2:~$ iperf3 -c 192.168.2.98 -B 192.168.2.30 -t 10 -R
+```
+
+`-B` binds the test to the address of the port under test. The rates to expect from the
+hardware (about 940 Mbit/s per port and direction with a 1000BASE-T link partner) are given in
+the [Yocto](yocto.md#test-the-ports-with-iperf3) section; the hardware design is the same for
+both Linux flows.
 
 [Ethernet FMC Max]: https://docs.opsero.com/op080/datasheet/overview/
 [supported Linux distributions]: https://docs.amd.com/r/en-US/ug1144-petalinux-tools-reference-guide/Setting-Up-Your-Environment

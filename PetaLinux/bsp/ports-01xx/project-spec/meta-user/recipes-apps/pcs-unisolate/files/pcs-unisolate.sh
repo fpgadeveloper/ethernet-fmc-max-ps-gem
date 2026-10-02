@@ -52,9 +52,16 @@ log() {
 }
 
 # ---- GEM0 (the MDIO master) base address, by SoC family ----
-if grep -aq 'xlnx,versal' /proc/device-tree/compatible 2>/dev/null; then
+# The root "compatible" names the SoC only in the classic (PetaLinux) device
+# tree; the SDT-generated one (EDF Yocto) has just the board there
+# ("xlnx,zcu102"), so the GEM nodes' own compatible is consulted as well.
+soc_is() {   # versal | zynqmp
+	cat /proc/device-tree/compatible /proc/device-tree/*/ethernet@*/compatible \
+		2>/dev/null | grep -aq "xlnx,$1"
+}
+if soc_is versal; then
 	GEM0_BASE=0xFF0C0000
-elif grep -aq 'xlnx,zynqmp' /proc/device-tree/compatible 2>/dev/null; then
+elif soc_is zynqmp; then
 	GEM0_BASE=0xFF0B0000
 else
 	log "unrecognised SoC; not clearing PCS isolate"

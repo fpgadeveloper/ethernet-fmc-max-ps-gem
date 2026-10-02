@@ -37,9 +37,9 @@ the FMC connector on which to connect the mezzanine card.
     {% if designs_in_group | length > 0 %}
 ### {{ group.name }} designs
 
-| Target board        | Target design     | Ports   | FMC Slot    | Standalone<br> Echo Server | PetaLinux | Vivado<br> Edition | IP<br>License |
-|---------------------|-------------------|---------|-------------|-----|-----|-----|-----|
-{% for design in data.designs %}{% if design.group == group.label and design.publish %}| [{{ design.board }}]({{ design.link }}) | `{{ design.label }}` | {{ design.lanes | length }}x | {{ design.connector }} | {% if design.baremetal %} ✅ {% else %} ❌ {% endif %} | {% if design.petalinux %} ✅ {% else %} ❌ {% endif %} | {{ "Enterprise" if design.license else "Standard 🆓" }} | {{ "Required" if design.ip_license else "-" }} |
+| Target board        | Target design     | Ports   | FMC Slot    | Standalone<br> Echo Server | PetaLinux | Yocto | Vivado<br> Edition | IP<br>License |
+|---------------------|-------------------|---------|-------------|-----|-----|-----|-----|-----|
+{% for design in data.designs %}{% if design.group == group.label and design.publish %}| [{{ design.board }}]({{ design.link }}) | `{{ design.label }}` | {{ design.lanes | length }}x | {{ design.connector }} | {% if design.baremetal %} ✅ {% else %} ❌ {% endif %} | {% if design.petalinux %} ✅ {% else %} ❌ {% endif %} | {% if design.yocto %} ✅ {% else %} ❌ {% endif %} | {{ "Enterprise" if design.license else "Standard 🆓" }} | {{ "Required" if design.ip_license else "-" }} |
 {% endif %}{% endfor %}
 {% endif %}
 {% endfor %}
@@ -76,7 +76,7 @@ To see the available targets and the state of a build:
 ```
 
 ```{note}
-The embedded Linux images (PetaLinux) can only be built on a
+The embedded Linux images (PetaLinux and Yocto) can only be built on a
 native Linux machine; everything else builds on Windows too. On Windows, the
 runner refuses the Linux-only stages up front and prints the exact command
 to run on the Linux machine. For Versal targets on Windows, the runner also
@@ -169,11 +169,34 @@ connection), you can follow these instructions.
 
 The PetaLinux builds will then be configured for offline build.
 
+### Build Yocto
+
+The Yocto (AMD EDF) build also requires a native Linux machine (one of the
+[supported Linux distributions]). It needs Vivado and Vitis 2025.2 (the flow
+uses the `sdtgen` tool that ships with Vitis to turn the XSA into a System
+Device Tree) and [Google's repo tool](https://gerrit.googlesource.com/git-repo/)
+on your `PATH`; PetaLinux Tools are not needed. The runner sources the Vivado
+and Vitis settings itself and builds the XSA first if it does not already
+exist:
+
+```
+./build.sh yocto --target <target>
+```
+
+Valid targets for Yocto are:
+{% for design in data.designs if design.yocto and design.publish %} `{{ design.label }}`{{ ", " if not loop.last else "." }} {% endfor %}
+
+The output products are written to `Yocto/<target>/images/linux/`. The first
+build of a target downloads several GB of sources and builds the image from
+scratch, so it takes a long time and needs 40-60 GB of disk space; later builds
+are incremental. See [Yocto](yocto.md) for the outputs, how to write them to an
+SD card, and how to test the ports.
+
 ### Build everything
 
 This builds everything that the target supports — the Vivado project and XSA,
-the standalone application and the PetaLinux image — and gathers the boot
-images into `bootimages/*.zip`:
+the standalone application, the PetaLinux image and the Yocto image — and
+gathers the boot images into `bootimages/*.zip`:
 
 ```
 ./build.sh all --target <target>
@@ -182,5 +205,32 @@ images into `bootimages/*.zip`:
 
 On Windows, `all` builds everything that the host can build and reports the
 Linux-only stages as `BLOCKED` rather than failing.
+
+The boot image zips are named `<project>_<target>_<flow>-2025-2.zip`, for
+example `ethernet-fmc-max-ps-gem_zcu106_hpc0_yocto-2025-2.zip`:
+
+| Zip | Contents |
+|-----|----------|
+| `…_standalone-2025-2.zip` | `BOOT.BIN` (and the `.bif` used to make it) for the lwIP echo server |
+| `…_petalinux-2025-2.zip` | `boot/` (`BOOT.BIN`, `image.ub`, `boot.scr`) for the FAT32 partition, `root/rootfs.tar.gz` for the ext4 partition |
+| `…_yocto-2025-2.zip` | `rootfs.wic.xz` + `rootfs.wic.bmap` (complete SD card image), `BOOT.BIN`, on Versal also `BOOTAA64.EFI`, and a `readme.txt` |
+
+`./build.sh package --target <target>` gathers the zips again. When a stage has
+been rebuilt since its zip was made, `package` rewrites the zip; a zip whose
+artifacts are all older is left as it is.
+
+### Free up disk space
+
+After a successful build, the intermediate files (Vivado project, Vitis
+workspace, PetaLinux and Yocto build trees) can be deleted while keeping
+everything that is needed to boot the board:
+
+```
+./build.sh clean --target <target> --keep-boot
+```
+
+The target still reports as built afterwards (`./build.sh status --target
+<target>`). Without `--keep-boot`, `clean` deletes all of the target's
+generated outputs after asking for confirmation.
 
 [supported Linux distributions]: https://docs.amd.com/r/en-US/ug1144-petalinux-tools-reference-guide/Setting-Up-Your-Environment

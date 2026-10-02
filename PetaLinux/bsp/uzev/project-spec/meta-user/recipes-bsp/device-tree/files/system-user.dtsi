@@ -57,19 +57,10 @@
 
 };
 
-&gem3 {
-   status = "okay";
-   phy-mode = "rgmii-id";
-   phy-handle = <&phy0>;
-   nvmem-cells = <&mac_address>;
-   nvmem-cell-names = "mac-address";
-   phy0: phy@0 {
-      reg = <0x0>;
-      ti,rx-internal-delay = <0x5>;
-      ti,tx-internal-delay = <0x5>;
-      ti,fifo-depth = <0x1>;
-   };
-};
+/* GEM3 is NOT the carrier's RJ45 in this design: all four PS GEMs go through
+ * EMIO to the Ethernet FMC Max, and GEM3 is FMC port 3. It is described by
+ * the port-config overlay (ports-0123) only; a board-RJ45 description here
+ * would be merged into the same node and conflict with it. */
 
 &i2c1 {
    i2cswitch@70 { /* U7 on UZ3EG SOM, U8 on UZ7EV SOM */

@@ -39,17 +39,23 @@ packages in the local sstate cache populated by the first run and completes
 cleanly. This is a mirror issue, not a problem with the reference design.
 
 
+## Linux issues (PetaLinux and Yocto)
+
 ### Ports not working
 
-Check the following if you are unable to get ports working in PetaLinux.
+Check the following if you are unable to get ports working in Linux.
 
 1. **Check the interface-to-port assignment for your design**   
-   In these designs the network interfaces map directly onto the Ethernet FMC Max ports:
-   `eth0` is port 0, `eth1` is port 1, and so on. See the
-   [Port configurations](petalinux.md#port-configurations) section for details. Note that
-   the VCK190 design supports ports 0 and 1 only (`eth0`/`eth1`), and that the development
+   In the PetaLinux images the network interfaces map directly onto the Ethernet FMC Max
+   ports: `eth0` is port 0, `eth1` is port 1, and so on (see
+   [Port configurations](petalinux.md#port-configurations)). In the Yocto images the
+   interfaces are called `end0` to `end3`, and on the Zynq UltraScale+ boards `end3` is
+   port 0 and `end0` is port 3 (see
+   [Interface names and FMC ports](yocto.md#interface-names-and-fmc-ports)). Note that
+   the VCK190 design supports ports 0 and 1 only, and that the development
    board's onboard Ethernet ports are not available in these designs (the GEMs that
-   normally drive them are routed to the FMC through EMIO).
+   normally drive them are routed to the FMC through EMIO). This includes the RJ45 port of
+   the UltraZed-EV carrier: GEM3 drives FMC port 3 in this design.
 
 2. **Each port must be assigned to a different subnet**   
    If you assign one interface to IP address 192.168.1.10, then you must use a different
@@ -57,6 +63,83 @@ Check the following if you are unable to get ports working in PetaLinux.
    under Linux must be assigned to different subnets, or they will not work.
    For example: `eth0=192.168.1.10`, `eth1=192.168.2.10`, `eth2=192.168.3.10`,
    `eth3=192.168.4.10`.
+
+### Link is up but no traffic passes (no DHCP address, ping fails)
+
+If a port reports `Link is Up - 1Gbps/Full` but receives nothing (its RX counters in
+`ip -s link` stay at zero and DHCP never gets an address), the ISOLATE bit of its PCS/PMA core
+has not been cleared. The `pcs-unisolate` boot service does that at every boot; check that it
+ran and what it did:
+
+```
+systemctl status pcs-unisolate
+dmesg | grep pcs-unisolate
+```
+
+Each core should be reported as `ISOLATE cleared` or `already de-isolated`. If the log says
+`unrecognised SoC; not clearing PCS isolate`, the image was built with an older version of
+the script that only recognised the SoC from the device tree's root `compatible`, which the
+Yocto device tree does not contain; rebuild the image with the current version of this
+repository. To un-isolate the cores by hand on a running system, write `0x1340` to control
+register 0 of each core with `phytool`, through GEM0's interface (`eth0` in PetaLinux; `end3`
+on the Zynq UltraScale+ boards and `end0` on the VCK190 in Yocto). The cores are at MDIO
+addresses 8 + port:
+
+```
+for a in 8 9 10 11; do sudo phytool write end3/$a/0 0x1340; done
+for a in 8 9 10 11; do sudo phytool read end3/$a/0; done
+```
+
+Each read should then return `0x1140`. On the VCK190, use addresses 8 and 9 only.
+
+### PHY not found, or the PHYs use the "Generic PHY" driver
+
+The Linux device tree describes the four DP83867 PHYs on the MDIO bus of GEM0 (at addresses 1,
+3, 12 and 15), and the other GEMs refer to them by `phy-handle` (`port-config.dtsi` in the
+port-config overlays). When a port is brought up, the kernel log should show the TI driver
+and GEM0's MDIO bus (`ff0b0000` on Zynq UltraScale+, `ff0c0000` on Versal), for example:
+
+```
+macb ff0c0000.ethernet end2: PHY [ff0b0000.ethernet-ffffffff:03] driver [TI DP83867] (irq=POLL)
+```
+
+If the PHY is not found, check that the mezzanine card is fully seated on the FMC connector
+used by your target and, on the VCK190, that VADJ is on (next section). If the driver shown
+is `Generic PHY`, the kernel was built without `CONFIG_DP83867_PHY`; it is enabled in each
+board's `bsp.cfg` kernel fragment.
+
+### VCK190: ports dead after power-up
+
+On the VCK190, the FMC I/O rail (VADJ, 1.5 V) is off at power-up, and the Ethernet FMC Max
+cannot work until it is on. In the PetaLinux and Yocto images, U-Boot switches VADJ on and
+then pulses the PHY resets in its boot command, before it boots Linux. If you change the
+U-Boot boot command (or save a U-Boot environment that replaces it), keep those steps in
+front of the boot: `run vadj_1v5_en; run phy_reset` in the PetaLinux image, and the I2C and
+GPIO writes of `Yocto/bsp/vck190/meta-user/recipes-bsp/u-boot/files/vck190-vadj-phyreset-bootcmd.cfg`
+in the Yocto image.
+
+During U-Boot start-up, before the boot command runs, U-Boot can report
+`Could not get PHY for eth0: addr 1`. This is expected: at that moment the PHYs are not yet
+powered and out of reset, and U-Boot does not use the Ethernet ports in this design.
+
+### "unable to generate target frequency: 125000000 Hz"
+
+On the Zynq UltraScale+ boards, the kernel can print
+`macb ff0b0000.ethernet end3: unable to generate target frequency: 125000000 Hz` just before
+`Link is Up - 1Gbps/Full`. This message can be ignored: in this design the GMII clocks of each
+GEM come from its PCS/PMA core in the PL, not from the PS clock that the driver tries to
+set, and the ports run at full rate.
+
+### Yocto: the board does not boot from the SD card
+
+* **Nothing at all on the UART:** `BOOT.BIN` is missing from the first (FAT) partition of
+  the card. The disk image does not carry it there; copy it as described in
+  [Prepare the SD card](yocto.md#prepare-the-sd-card). Also check the boot mode switches.
+* **VCK190 stops at the U-Boot prompt:** the `EFI/BOOT/` directory on the first partition is
+  empty. Copy `BOOTAA64.EFI` (from the Yocto zip) into it, see
+  [Prepare the SD card](yocto.md#prepare-the-sd-card).
+* **The image does not fit on the card:** the disk image is slightly larger than 8 GiB; use
+  a 16 GB or larger card.
 
 ### Dropped pings/packets
 
